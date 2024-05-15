@@ -53,3 +53,6 @@ Old change log:
   
   HUD
   - Fix Momu Hud Lag
+ 
+   Other
+   - Fix trailling
