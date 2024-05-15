@@ -11,7 +11,7 @@ _C = _C or {
     Version = 1.35,
     PageSize = 7,
     GameType = "bhop",
-    ServerName = "your server namme",
+    ServerName = "justa's cool server",
     Identifier = "jcs-bhop",
     SteamGroup = "",
     MaterialID = "kawaii",
@@ -122,26 +122,29 @@ hook.Add("StartCommand", "ChangeAngles", ChangePlayerAngle)
 
 local function AutoStrafe(cmd)
     if LocalPlayer().Style == _C.Style.AutoStrafe and cmd:KeyDown(IN_JUMP) then
-        cmd:SetSideMove(cmd:GetMouseX() < -1 and -999999999999999999999 or 999999999999999999999)
+        cmd:SetSideMove(cmd:GetMouseX() < -1 and -10000 or 10000)
     end
 end
 hook.Add("CreateMove", "ChangeAngAutoStrafeles", AutoStrafe)
 
 hook.Add("Move", "SetMaxSpeed", function(ply, mv)
-    mv:SetMaxSpeed(8000000000000000000000)
+    mv:SetMaxSpeed(10000)
     mv:SetFinalStepHeight(18)
 end)
 
-hook.Add("SetupMove","MySpeed", function( ply, mv, data )
-	if ( not ply:IsOnGround() ) then mv:SetMaxClientSpeed( 8000000000000000000000 ) end
-	if ( ply:IsOnGround() ) then mv:SetMaxClientSpeed( 250 ) end
-end )
+hook.Add("SetupMove", "MySpeed", function(ply, mv, data)
+    if not ply:IsOnGround() then
+        mv:SetMaxClientSpeed(10000)
+    else
+        mv:SetMaxClientSpeed(250)
+    end
+end)
 
 local function MovementCMD(cmd)
     local ply = LocalPlayer()
     if IsValid(ply) and ply:GetMoveType() ~= MOVETYPE_NOCLIP and ply:GetMoveType() ~= MOVETYPE_OBSERVER then
-        local fmove = cmd:KeyDown(IN_FORWARD) and 1000000000 or cmd:KeyDown(IN_BACK) and -1000000000 or 0
-        local smove = cmd:KeyDown(IN_MOVERIGHT) and 1000000000 or cmd:KeyDown(IN_MOVELEFT) and -1000000000 or 0
+        local fmove = cmd:KeyDown(IN_FORWARD) and 10000 or cmd:KeyDown(IN_BACK) and -10000 or 0
+        local smove = cmd:KeyDown(IN_MOVERIGHT) and 10000 or cmd:KeyDown(IN_MOVELEFT) and -10000 or 0
         cmd:SetForwardMove(fmove)
         cmd:SetSideMove(smove)
     end
@@ -317,7 +320,7 @@ end
 
 local function SV_AirMove(ply, mv, cmd)
     local velocity = mv:GetVelocity()
-    local fmove, smove = mv:GetForwardSpeed(), cmd:GetSideMove()
+    local fmove, smove = cmd:GetForwardMove(), cmd:GetSideMove()
     local forward, right, up = Vector(), Vector(), Vector()
     local ang = mv:GetAngles()
 
