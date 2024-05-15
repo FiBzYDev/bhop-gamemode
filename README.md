@@ -55,8 +55,9 @@ Old change log:
   - Fix Momu Hud Lag
   - Remake !menu
   - Fix RTV Menu bugs
- - Fix Timer display No Timer on spectator
- - Fix "4;" on Improved by
+  - Fix Timer display No Timer on spectator
+  - Fix "4;" on Improved by
+  - Finish progress on JCS Scoreboard
    
    Other
    - Fix trailling
