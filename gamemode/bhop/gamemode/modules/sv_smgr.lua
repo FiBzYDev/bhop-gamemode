@@ -228,49 +228,39 @@ local function norm(i)
     return i
 end
 
-local fb, ml, mr = bit.band, IN_MOVELEFT, IN_MOVERIGHT
+local function norm( i ) if i > 180 then i = i - 360 elseif i < -180 then i = i + 360 end return i end
+local fb = bit.band
+local MonitorAngle = {}
+local function MonitorInputSync( ply, data )
+	if not Monitored[ ply ] then return end
 
-local function MonitorInputSync(ply, data)
-    if not Monitored[ply] then
-        return
-    end
-    if not ply:Alive() then
-        return
-    end
+	local buttons = data:GetButtons()
+	local ang = data:GetAngles().y
 
-    local vel = data:GetVelocity()
-    local ang = math.deg(math.atan2(vel.y, vel.x)) -- Calculate movement angle based on velocity
-    local buttons = data:GetButtons()
-    local l, r = fb(buttons, ml) > 0, fb(buttons, mr) > 0
+	if not ply:IsFlagSet( FL_ONGROUND + FL_INWATER ) and ply:GetMoveType() != MOVETYPE_LADDER then
+		local difference = norm( ang - MonitorAngle[ ply ] )
+		
+		if difference > 0 then
+			SyncTotal[ ply ] = SyncTotal[ ply ] + 1
+				
+			if (fb( buttons, IN_MOVELEFT ) > 0) and not (fb( buttons, IN_MOVERIGHT ) > 0) then
+				SyncAlignA[ ply ] = SyncAlignA[ ply ] + 1
+			end
+			if data:GetSideSpeed() < 0 then
+				SyncAlignB[ ply ] = SyncAlignB[ ply ] + 1
+			end
+		elseif difference < 0 then
+			SyncTotal[ ply ] = SyncTotal[ ply ] + 1
 
-    if not ply:IsFlagSet(FL_ONGROUND + FL_INWATER) and ply:GetMoveType() ~= MOVETYPE_LADDER then
-        if MonAngle[ply] == nil then
-            return
-        end
-
-        local difference = norm(ang - MonAngle[ply])
-
-        if difference > 0 then
-            SyncTotal[ply] = SyncTotal[ply] + 1
-            if l and not r then
-                SyncAlignA[ply] = SyncAlignA[ply] + 1
-            end
-        elseif difference < 0 then
-            SyncTotal[ply] = SyncTotal[ply] + 1
-            if r and not l then
-                SyncAlignA[ply] = SyncAlignA[ply] + 1
-            end
-        end
-    end
-
-    MonAngle[ply] = ang
-
-    --[[-- Calculate the timing using the tick-based method
-    local tickInterval = engine.TickInterval()
-    local timing = CurTime() + tickInterval / 0.1
-
-    -- Store the timing with the player data
-    SyncTiming[ply] = timing--]]
+			if (fb( buttons, IN_MOVERIGHT ) > 0) and not (fb( buttons, IN_MOVELEFT ) > 0) then
+				SyncAlignA[ ply ] = SyncAlignA[ ply ] + 1
+			end
+			if data:GetSideSpeed() > 0 then
+				SyncAlignB[ ply ] = SyncAlignB[ ply ] + 1
+			end
+		end
+	end
+	
+	MonitorAngle[ ply ] = ang
 end
-
-hook.Add("SetupMove", "MonitorInputSync", MonitorInputSync)
+hook.Add( "SetupMove", "MonitorInputSync", MonitorInputSync )
