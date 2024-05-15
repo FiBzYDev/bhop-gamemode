@@ -44,7 +44,12 @@ Old change log:
   Note: this version is not finished but the base works.
 
   DO TO:
+
+  JHud/SSJ
   - Fix sync display
   - Fix Jump Display
   - Fix Eff Display
   - Fix SJP Display
+  
+  HUD
+  - Fix Momu Hud Lag
