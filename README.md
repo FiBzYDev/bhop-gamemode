@@ -54,6 +54,7 @@ Old change log:
   HUD
   - Fix Momu Hud Lag
   - Remake !menu
+  - Fix RTV Menu bugs
  
    Other
    - Fix trailling
