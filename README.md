@@ -58,7 +58,8 @@ Old change log:
  
    Other
    - Fix trailling
- 
+   - Fix Timer display little off
+  
   Newest things added:
 
   - Momu Hud time turns red when your time is too high to beat the WR
