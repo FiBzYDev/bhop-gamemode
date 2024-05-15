@@ -102,7 +102,7 @@ end
 
 include("sh_playerclass.lua" )
 include("sh_disablehooks.lua")
---include("cl_disablehooks.lua")
+include("cl_disablehooks.lua")
 
 local mc, mp = math.Clamp, math.pow
 local bn, ba, bo = bit.bnot, bit.band, bit.bor
