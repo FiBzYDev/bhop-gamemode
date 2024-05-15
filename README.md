@@ -59,6 +59,7 @@ Old change log:
    Other
    - Fix trailling
    - Fix Timer display little off
+   - Fix Replays acting werid
   
   Newest things added:
 
