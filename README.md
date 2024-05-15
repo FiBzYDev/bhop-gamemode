@@ -56,3 +56,11 @@ Old change log:
  
    Other
    - Fix trailling
+ 
+  Newest things added:
+
+  - Momu Hud time turns red when your time is too high to beat the WR
+  - New Movement Code
+  - Fixed RNGfix uphill to work better
+
+  - Momu Hud time turns red when your time is too high to beat the WR
