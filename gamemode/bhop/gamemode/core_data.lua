@@ -5,371 +5,349 @@ MySQL.queries = {}
 UI, DATA = {}, {}
 local db = db or false
 
-util.AddNetworkString "userinterface.network"
-
-require "mysqloo"
+util.AddNetworkString("userinterface.network")
+require("mysqloo")
 
 Core = Core or {}
 Core.Protocol = "SecureTransfer"
 Core.Protocol2 = "BinaryTransfer"
 Core.Try = 0
 
-util.AddNetworkString( Core.Protocol )
-util.AddNetworkString( Core.Protocol2 )
+util.AddNetworkString(Core.Protocol)
+util.AddNetworkString(Core.Protocol2)
 
+-- Core Functions
 function Core:Boot()
-	Command:Init()
-	RTV:Init()
-
-	Core:LoadZones()
-	Timer:LoadRecords()
-	Player:LoadRanks()
-	Player:LoadTop()
-
-	Timer:AddPlays()
+    Command:Init()
+    RTV:Init()
+    Core:LoadZones()
+    Timer:LoadRecords()
+    Player:LoadRanks()
+    Player:LoadTop()
+    Timer:AddPlays()
 end
 
-function Core:Unload( bForce )
-	Bot:Save( bForce )
+function Core:Unload(force)
+    Bot:Save(force)
 end
 
 function Core:LoadZones()
-	local zones = sql.Query( "SELECT nType, vPos1, vPos2 FROM game_zones WHERE szMap = '" .. game.GetMap() .. "'" )
-	if not zones then return end
+    local zones = sql.Query("SELECT nType, vPos1, vPos2 FROM game_zones WHERE szMap = '" .. game.GetMap() .. "'")
+    if not zones then return end
 
-	Zones.Cache = {}
-	for _,data in pairs( zones ) do
-		table.insert( Zones.Cache, {
-			Type = tonumber( data[ "nType" ] ),
-			P1 = util.StringToType( tostring( data[ "vPos1" ] ), "Vector" ),
-			P2 = util.StringToType( tostring( data[ "vPos2" ] ), "Vector" )
-		} )
-	end
+    Zones.Cache = {}
+    for _, data in ipairs(zones) do
+        table.insert(Zones.Cache, {
+            Type = tonumber(data["nType"]),
+            P1 = util.StringToType(tostring(data["vPos1"]), "Vector"),
+            P2 = util.StringToType(tostring(data["vPos2"]), "Vector")
+        })
+    end
 end
 
-function Core:AwaitLoad( bRetry )
-	if not bRetry then
-		Zones:SetupMap()
-		Bot:Setup()
-		Core:Optimize()
+function Core:AwaitLoad(retry)
+    if not retry then
+        Zones:SetupMap()
+        Bot:Setup()
+        Core:Optimize()
 
-		if SQL.Use then
-			if timer.Exists( "SQLCheck" ) then
-				timer.Destroy( "SQLCheck" )
-			end
+        if SQL.Use then
+            if timer.Exists("SQLCheck") then
+                timer.Remove("SQLCheck")
+            end
 
-			timer.Simple( 0, function() Core:StartSQL() end )
-			timer.Create( "SQLCheck", 10, 0, Core.SQLCheck )
-		else
-			SQL:LoadNoMySQL()
-		end
-	end
+            timer.Simple(0, function() Core:StartSQL() end)
+            timer.Create("SQLCheck", 10, 0, Core.SQLCheck)
+        else
+            SQL:LoadNoMySQL()
+        end
+    end
 
-	if #Zones.Cache > 0 then
-		Zones:Setup()
-		Core.Try = 0
-	else
-		if Core.Try < 100 then
-			Core.Try = Core.Try + 1
-			Core:LoadZones()
-			
-			timer.Simple( 60, function() Core:AwaitLoad( true ) end )
-		end
-	end
+    if #Zones.Cache > 0 then
+        Zones:Setup()
+        Core.Try = 0
+    else
+        if Core.Try < 100 then
+            Core.Try = Core.Try + 1
+            Core:LoadZones()
+            timer.Simple(60, function() Core:AwaitLoad(true) end)
+        end
+    end
 end
 
 function Core:StartSQL()
-	if not SQL.Use then return end
+    if not SQL.Use then return end
 
-	local function OnComplete()
-		Admin:LoadAdmins()
-		Admin:LoadNotifications()
+    local function onComplete()
+        Admin:LoadAdmins()
+        Admin:LoadNotifications()
+        Core.SQLChecking = nil
+    end
 
-		Core.SQLChecking = nil
-	end
-	
-	SQL:CreateObject( OnComplete )
-	timer.Simple( 60, function()
-		Core.SQLChecking = nil
-	end )
+    SQL:CreateObject(onComplete)
+    timer.Simple(60, function() Core.SQLChecking = nil end)
 end
 
 function Core.SQLCheck()
-	if not SQL.Use then return end
+    if not SQL.Use then return end
 
-	if (not Admin.Loaded or SQL.Error) and not Core.SQLChecking then
-		SQL.Error = nil
-		Core.SQLChecking = true
-		Core:StartSQL()
-	end
+    if (not Admin.Loaded or SQL.Error) and not Core.SQLChecking then
+        SQL.Error = nil
+        Core.SQLChecking = true
+        Core:StartSQL()
+    end
 end
 
-function Core:Assert( varType, szType )
-	if varType and type( varType ) == "table" and varType[ 1 ] and type( varType[ 1 ] ) == "table" and varType[ 1 ][ szType ] then
-		return true
-	end
-
-	return false
+function Core:Assert(varType, szType)
+    return varType and type(varType) == "table" and varType[1] and type(varType[1]) == "table" and varType[1][szType] or false
 end
 
-function Core:Null( varInput, varAlternate )
-	if varInput and type( varInput ) == "string" and varInput != "NULL" then
-		return varInput
-	end
-
-	return varAlternate or nil
+function Core:Null(varInput, varAlternate)
+    return varInput and type(varInput) == "string" and varInput ~= "NULL" and varInput or varAlternate
 end
 
-function Core:Print( szPrefix, szText )
-	print( "[" .. (szPrefix or "Core") .. "]", szText )
+function Core:Print(szPrefix, szText)
+    print("[" .. (szPrefix or "Core") .. "]", szText)
 end
 
-function Core:Send( ply, szAction, varArgs )
-	net.Start( Core.Protocol )
-	net.WriteString( szAction )
+function Core:Send(ply, szAction, varArgs)
+    net.Start(Core.Protocol)
+    net.WriteString(szAction)
 
-	if varArgs and type( varArgs ) == "table" then
-		net.WriteBit( true )
-		net.WriteTable( varArgs )
-		net.WriteUInt(32, 16)
-	else
-		net.WriteBit( false )
-	end
+    if varArgs and type(varArgs) == "table" then
+        net.WriteBool(true)
+        net.WriteTable(varArgs)
+    else
+        net.WriteBool(false)
+    end
 
-	net.Send( ply )
+    net.Send(ply)
 end
 
-function Core:Broadcast( szAction, varArgs, varExclude )
-	net.Start( Core.Protocol )
-	net.WriteString( szAction )
+function Core:Broadcast(szAction, varArgs, varExclude)
+    net.Start(Core.Protocol)
+    net.WriteString(szAction)
 
-	if varArgs and type( varArgs ) == "table" then
-		net.WriteBit( true )
-		net.WriteTable( varArgs )
-	else
-		net.WriteBit( false )
-	end
+    if varArgs and type(varArgs) == "table" then
+        net.WriteBool(true)
+        net.WriteTable(varArgs)
+    else
+        net.WriteBool(false)
+    end
 
-	if varExclude and (type( varExlude ) == "table" or (IsValid( varExclude ) and varExclude:IsPlayer())) then
-		net.SendOmit( varExclude )
-	else
-		net.Broadcast()
-	end
+    if varExclude and (type(varExclude) == "table" or (IsValid(varExclude) and varExclude:IsPlayer())) then
+        net.SendOmit(varExclude)
+    else
+        net.Broadcast()
+    end
 end
 
-local function CoreHandle( ply, szAction, varArgs )
-	if szAction == "Admin" then
-		Admin:HandleClient( ply, varArgs )
-	elseif szAction == "Speed" then
-		Timer:AddSpeedData( ply, varArgs )
-	elseif szAction == "WRList" then
-		Timer:SendWRList( ply, varArgs[ 1 ], varArgs[ 2 ], varArgs[ 3 ] )
-	elseif szAction == "MapList" then
-		RTV:GetMapList( ply, varArgs[ 1 ] )
-	elseif szAction == "Vote" then
-		RTV:ReceiveVote( ply, varArgs[ 1 ], varArgs[ 2 ] )
-	elseif szAction == "TopList" then
-		Player:SendTopList( ply, varArgs[ 1 ], varArgs[ 2 ] )
-	elseif szAction == "Checkpoints" then
-		Timer:CPHandleCallback( ply, varArgs[ 1 ], varArgs[ 2 ], varArgs[ 3 ] )
-	elseif szAction == 'abc' then 
-		JAC:RegisterDetection(ply, 'no_startcommand')
-	end
+local function coreHandle(ply, szAction, varArgs)
+    if szAction == "Admin" then
+        Admin:HandleClient(ply, varArgs)
+    elseif szAction == "Speed" then
+        Timer:AddSpeedData(ply, varArgs)
+    elseif szAction == "WRList" then
+        Timer:SendWRList(ply, varArgs[1], varArgs[2], varArgs[3])
+    elseif szAction == "MapList" then
+        RTV:GetMapList(ply, varArgs[1])
+    elseif szAction == "Vote" then
+        RTV:ReceiveVote(ply, varArgs[1], varArgs[2])
+    elseif szAction == "TopList" then
+        Player:SendTopList(ply, varArgs[1], varArgs[2])
+    elseif szAction == "Checkpoints" then
+        Timer:CPHandleCallback(ply, varArgs[1], varArgs[2], varArgs[3])
+    elseif szAction == 'abc' then
+        JAC:RegisterDetection(ply, 'no_startcommand')
+    end
 end
 
-local function CoreReceive( _, ply )
-	local szAction = net.ReadString()
-	local bTable = net.ReadBit() == 1
-	local varArgs = {}
+local function coreReceive(_, ply)
+    local szAction = net.ReadString()
+    local bTable = net.ReadBool()
+    local varArgs = bTable and net.ReadTable() or {}
 
-	if bTable then
-		varArgs = net.ReadTable()
-	end
-
-	if IsValid( ply ) and ply:IsPlayer() then
-		CoreHandle( ply, szAction, varArgs )
-	end
+    if IsValid(ply) and ply:IsPlayer() then
+        coreHandle(ply, szAction, varArgs)
+    end
 end
-net.Receive( Core.Protocol, CoreReceive )
+net.Receive(Core.Protocol, coreReceive)
 
-local function BinaryReceive( l, ply )
-	local length = net.ReadUInt( 32 )
-	local data = net.ReadData( length )
+local function binaryReceive(_, ply)
+    local length = net.ReadUInt(32)
+    local data = net.ReadData(length)
 
-	if IsValid( ply ) then
-		local target = Admin.Screenshot[ ply ]
-		if IsValid( target ) then
-			net.Start( Core.Protocol2 )
-			net.WriteString( "Data" )
-			net.WriteUInt( length, 32 )
-			net.WriteData( data, length )
-			net.Send( target )
-			
-			Admin.Screenshot[ ply ] = nil
-		end
-	end
+    if IsValid(ply) then
+        local target = Admin.Screenshot[ply]
+        if IsValid(target) then
+            net.Start(Core.Protocol2)
+            net.WriteString("Data")
+            net.WriteUInt(length, 32)
+            net.WriteData(data, length)
+            net.Send(target)
+            Admin.Screenshot[ply] = nil
+        end
+    end
 end
-net.Receive( Core.Protocol2, BinaryReceive )
+net.Receive(Core.Protocol2, binaryReceive)
 
+-- SQL Functions
 SQL.Available = true
 local SQLObject
 local SQLDetails = {
-    Host = "yourwebhere",
+    Host = "176.9.2.59",
     Port = 3306,
-    User = "root",
+    User = "u177_sYbfn4GCtV",
     Pass = "",
-    Database = "kawaii"
+    Database = "s177_kawaii"
 }
 
-local function SQL_Print( szMsg, varArg )
-	print( szMsg, varArg or "" )
+local function sqlPrint(msg, arg)
+    print(msg, arg or "")
 end
 
-local function SQL_ConnectSuccess( fCallback )
-	SQL.Available = true
-	SQL.Busy = false
-
-	fCallback()
+local function sqlConnectSuccess(callback)
+    SQL.Available = true
+    SQL.Busy = false
+    callback()
 end
 
-local function SQL_ConnectFailure( obj, szError )
-	SQL.Available = false
-	SQL.Busy = false
+local function sqlConnectFailure(_, err)
+    SQL.Available = false
+    SQL.Busy = false
+    print("SQL connection failed:", err)
 end
 
-local function SQL_Query( szQuery, fCallback, varArgs )
-	if not SQLObject or not SQL.Available then
-		return SQL_Print( "No valid SQLObject to execute query: ", szQuery )
-	elseif not szQuery or szQuery == "" then
-		return SQL_Print( "No valid SQLQuery to execute" )
-	end
+local function sqlQuery(query, callback, args)
+    if not SQLObject or not SQL.Available then
+        return sqlPrint("No valid SQLObject to execute query: ", query)
+    elseif not query or query == "" then
+        return sqlPrint("No valid SQLQuery to execute")
+    end
 
-	local query = SQLObject:query( szQuery )
-	local function fSuccess( obj, varData )
-		if fCallback then
-			fCallback( varData, varArgs )
-		end
-	end
-	
-	local function fError( obj, szError, szSQL )
-		if fCallback then
-			fCallback( nil, nil, szError or "" )
-		end
+    local q = SQLObject:query(query)
+    
+    function q:onSuccess(data)
+        if callback then
+            callback(data, args)
+        end
+    end
+    
+    function q:onError(err)
+        if callback then
+            callback(nil, args, err)
+        end
 
-		if string.find( string.lower( szError ), "lost connection", 1, true ) or string.find( string.lower( szError ), "gone away", 1, true ) then
-			SQL.Error = true
-			return false
-		end
-	end
+        if string.find(string.lower(err), "lost connection", 1, true) or string.find(string.lower(err), "gone away", 1, true) then
+            SQL.Error = true
+            return false
+        end
+    end
 
-	query.onSuccess = fSuccess
-	query.onError = fError
-	query:start()
+    q:start()
 end
 
-local function SQL_Execute( szQuery, fCallback, varArg )
-	SQL_Query( szQuery, function( varData, varArgs, szError )
-		fCallback( varData, varArgs, szError )
-	end, varArg )
+local function sqlExecute(query, callback, args)
+    sqlQuery(query, function(data, varArgs, err)
+        callback(data, varArgs, err)
+    end, args)
 end
 
-function SQL:CreateObject( SQL_ConnectCallback )
-	local function SQL_SelectCallback()
-		SQL_ConnectSuccess( SQL_ConnectCallback )
-	end
+function SQL:CreateObject(callback)
+    local function selectCallback()
+        sqlConnectSuccess(callback)
+    end
 
-	SQL.Busy = true
+    SQL.Busy = true
 
-	SQLObject = mysqloo.connect( SQLDetails.Host, SQLDetails.User, SQLDetails.Pass, SQLDetails.Database, SQLDetails.Port )
-	SQLObject.onConnected = SQL_SelectCallback
-	SQLObject.onConnectionFailed = SQL_ConnectFailure
-	SQLObject:connect()
-end	
-
-function SQL:Prepare( szQuery, varArgs, bNoQuote )
-	if not SQL.Use then
-		return SQL:LocalPrepare( szQuery, varArgs, bNoQuote )
-	end
-
-	if not SQLObject or not SQL.Available then
-		return { Execute = function() end }
-	end
-
-	if varArgs and #varArgs > 0 then
-		for i = 1, #varArgs do
-			local sort = type( varArgs[ i ] )
-			local num = tonumber( varArgs[ i ] )
-			local arg = ""
-
-			if sort == "string" and not num then
-				arg = SQLObject:escape( varArgs[ i ] )
-				if not bNoQuote then
-					arg = "'" .. arg .. "'"
-				end
-			elseif (sort == "string" and num) or (sort == "number") then
-				arg = varArgs[ i ]
-			else
-				arg = tostring( varArgs[ i ] ) or ""
-			end
-			
-			szQuery = string.gsub( szQuery, "{" .. i - 1 .. "}", arg )
-		end
-	end
-	
-	return { Query = szQuery, Execute = function( self, fCallback, varArg ) SQL_Execute( self.Query, fCallback, varArg ) end }
+    SQLObject = mysqloo.connect(SQLDetails.Host, SQLDetails.User, SQLDetails.Pass, SQLDetails.Database, SQLDetails.Port)
+    SQLObject.onConnected = selectCallback
+    SQLObject.onConnectionFailed = sqlConnectFailure
+    SQLObject:connect()
 end
 
-function SQL:LocalPrepare( szQuery, varArgs, bNoQuote )
-	if not SQL.LoadedSQLite then
-		return { Execute = function() end }
-	end
+function SQL:Prepare(query, args, noQuote)
+    if not SQL.Use then
+        return SQL:LocalPrepare(query, args, noQuote)
+    end
 
-	if varArgs and #varArgs > 0 then
-		for i = 1, #varArgs do
-			local sort = type( varArgs[ i ] )
-			local num = tonumber( varArgs[ i ] )
-			local arg = ""
+    if not SQLObject or not SQL.Available then
+        return { Execute = function() end }
+    end
 
-			if sort == "string" and not num then
-				arg = sql.SQLStr( varArgs[ i ] )
-				if bNoQuote then
-					arg = string.sub( arg, 2, string.len( arg ) - 1 )
-				end
-			elseif (sort == "string" and num) or (sort == "number") then
-				arg = varArgs[ i ]
-			else
-				arg = tostring( varArgs[ i ] ) or ""
-			end
+    if args and #args > 0 then
+        for i = 1, #args do
+            local argType = type(args[i])
+            local arg = ""
 
-			szQuery = string.gsub( szQuery, "{" .. i - 1 .. "}", arg )
-		end
-	end
-
-	local varData, szError
-	local data = sql.Query( szQuery )
-
-	if data then
-		for id,item in pairs( data ) do
-			for key,value in pairs( item ) do
-				if tonumber( value ) then
-					data[ id ][ key ] = tonumber( value )
-				end
-			end
-		end
-
-		varData = data
-	else
-		local statement = string.sub( szQuery, 1, 6 )
-		if statement == "SELECT" then
-			szError = sql.LastError() or "Unknown error"
-		else
-			varData = true
-		end
-	end
-
-	return { Query = szQuery, Execute = function( self, fCallback, varArg ) fCallback( varData, varArg, szError ) end }
+            if argType == "string" and not tonumber(args[i]) then
+                arg = SQLObject:escape(args[i])
+                if not noQuote then
+                    arg = "'" .. arg .. "'"
+                end
+            elseif argType == "number" or (argType == "string" and tonumber(args[i])) then
+                arg = args[i]
+            else
+                arg = tostring(args[i]) or ""
+            end
+            
+            query = string.gsub(query, "{" .. i - 1 .. "}", arg)
+        end
+    end
+    
+    return { Query = query, Execute = function(self, callback, varArg) sqlExecute(self.Query, callback, varArg) end }
 end
 
+function SQL:LocalPrepare(query, args, noQuote)
+    if not SQL.LoadedSQLite then
+        return { Execute = function() end }
+    end
+
+    if args and #args > 0 then
+        for i = 1, #args do
+            local argType = type(args[i])
+            local arg = ""
+
+            if argType == "string" and not tonumber(args[i]) then
+                arg = sql.SQLStr(args[i])
+                if noQuote then
+                    arg = string.sub(arg, 2, string.len(arg) - 1)
+                end
+            elseif argType == "number" or (argType == "string" and tonumber(args[i])) then
+                arg = args[i]
+            else
+                arg = tostring(args[i]) or ""
+            end
+
+            query = string.gsub(query, "{" .. i - 1 .. "}", arg)
+        end
+    end
+
+    local data, err
+    local result = sql.Query(query)
+
+    if result then
+        for id, item in ipairs(result) do
+            for key, value in pairs(item) do
+                if tonumber(value) then
+                    result[id][key] = tonumber(value)
+                end
+            end
+        end
+        data = result
+    else
+        local statement = string.sub(query, 1, 6)
+        if statement == "SELECT" then
+            err = sql.LastError() or "Unknown error"
+        else
+            data = true
+        end
+    end
+
+    return { Query = query, Execute = function(self, callback, varArg) callback(data, varArg, err) end }
+end
+
+-- UI Functions
 function UI:SendToClient(client, uiId, ...)
     local net_contents = {...}
 
@@ -388,7 +366,7 @@ function UI:AddListener(id, func)
     DATA[id] = func
 end
 
-net.Receive("userinterface.network", function(len, cl)
+net.Receive("userinterface.network", function(_, cl)
     local network_id = net.ReadString()
     local network_data = net.ReadTable()
 
@@ -400,7 +378,8 @@ net.Receive("userinterface.network", function(len, cl)
     end
 end)
 
-function Connect()
+-- MySQL Functions
+local function connect()
     if db and db:status() == mysqloo.DATABASE_CONNECTED then
         return
     end
@@ -408,14 +387,14 @@ function Connect()
     db = mysqloo.connect(SQLDetails.Host, SQLDetails.User, SQLDetails.Pass, SQLDetails.Database, SQLDetails.Port)
 
     function db:onConnected()
-        --print("Database connected successfully!")
+        print("Database connected successfully!")
         MySQL:StartUp()
         MySQL:ProcessQueuedQueries()
     end
 
     function db:onConnectionFailed(err)
         print("Database connection failed:", err)
-        timer.Simple(20, Connect)
+        timer.Simple(20, connect)
     end
 
     db:connect()
@@ -426,15 +405,13 @@ function MySQL:StartUp()
 end
 
 function MySQL:ProcessQueuedQueries()
-    if not self.queuedQueries then
-        self.queuedQueries = {}  -- Initialize queuedQueries as an empty table if it's nil
-    end
+    self.queuedQueries = self.queuedQueries or {}
 
     for _, queryData in ipairs(self.queuedQueries) do
         MySQL:Start(queryData.query, queryData.callback)
     end
 
-    self.queuedQueries = {}  -- Clear the queued queries
+    self.queuedQueries = {}
 end
 
 function MySQL:Start(query, callback)
@@ -446,7 +423,6 @@ function MySQL:Start(query, callback)
     local q = db:query(query)
 
     function q:onSuccess(data)
-        --print("Query successful")
         if callback then
             callback(data)
         end
@@ -463,4 +439,4 @@ function MySQL:Escape(str)
     return sql.SQLStr(str)
 end
 
-Connect()
+connect()
