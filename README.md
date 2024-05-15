@@ -39,8 +39,4 @@ Old change log:
 - SPJ Added to SSJ Stats
 - Roblox Hud Added
 - Maxspeed fixed
-Added lua fixes
-FiBzY — 04/07/2024 1:04 PM
-Fixed servre problem with server (movement/timer)
-FiBzY — 04/22/2024 2:00 AM
-New version half ready
+- Added lua fixes
