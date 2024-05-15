@@ -739,7 +739,7 @@ function Timer:UpdateWRs(ply)
     Core:Send(ply, "update_wr", wrs)
 end
 
-util.AddNetworkString "SyncMeter"
+--[[util.AddNetworkString "SyncMeter"
 
 local Sync = {}
 Sync.SyncMeter = true
@@ -822,7 +822,7 @@ local function SendSyncPeriodically()
 end
 
 -- Call the function to start the periodic syncing
-SendSyncPeriodically()
+SendSyncPeriodically()--]]
 
 local function FixRNG(ply, data, cmd)
     local vel = data:GetVelocity()
