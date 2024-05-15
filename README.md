@@ -53,6 +53,7 @@ Old change log:
   
   HUD
   - Fix Momu Hud Lag
+  - Remake !menu
  
    Other
    - Fix trailling
