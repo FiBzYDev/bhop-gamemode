@@ -64,3 +64,5 @@ Old change log:
   - Fixed RNGfix uphill to work better
   - Momu Hud time turns red when your time is too high to beat the WR
   - Fixed lag on gamemode, movement was choppy and FPS ms was too high
+
+  We now have AI to help fix and improve gamemode to the best it can be.
