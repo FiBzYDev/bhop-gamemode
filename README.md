@@ -1,4 +1,4 @@
-My version of flows bunnyhop gamemode heavily edited
+My version of flows bunnyhop gamemode heavily edited, version 1.35
 
 Old change log:
 - Main Menu/Options Base
