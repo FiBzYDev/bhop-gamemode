@@ -55,7 +55,9 @@ Old change log:
   - Fix Momu Hud Lag
   - Remake !menu
   - Fix RTV Menu bugs
- 
+ - Fix Timer display No Timer on spectator
+ - Fix "4;" on Improved by
+   
    Other
    - Fix trailling
    - Fix Timer display little off
