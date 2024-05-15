@@ -63,6 +63,7 @@ Old change log:
    - Fix trailling
    - Fix Timer display little off
    - Fix Replays acting werid
+   - Fix Telefix
   
   Newest things added:
 
