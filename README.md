@@ -40,3 +40,11 @@ Old change log:
 - Roblox Hud Added
 - Maxspeed fixed
 - Added lua fixes
+  
+  Note: this version is not finished but the base works.
+
+  DO TO:
+  - Fix sync display
+  - Fix Jump Display
+  - Fix Eff Display
+  - Fix SJP Display
