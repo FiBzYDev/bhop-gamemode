@@ -47,7 +47,6 @@ gamemodes\bhop\gamemode\cl_init.lua
 gamemodes\bhop\gamemode\cl_receive.lua
 gamemodes\bhop\gamemode\cl_timer.lua
 gamemodes\bhop\gamemode\core.lua
-gamemodes\bhop\gamemode\core_view.lua
 gamemodes\bhop\gamemode\userinterface\cl_hud.lua
 gamemodes\bhop\gamemode\userinterface\cl_settings.lua
 gamemodes\bhop\gamemode\userinterface\cl_themes.lua
