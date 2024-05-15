@@ -64,7 +64,8 @@ Old change log:
    - Fix Timer display little off
    - Fix Replays acting werid
    - Fix Telefix
-  
+     - Fix Styles
+       
   Newest things added:
 
   - Momu Hud time turns red when your time is too high to beat the WR
