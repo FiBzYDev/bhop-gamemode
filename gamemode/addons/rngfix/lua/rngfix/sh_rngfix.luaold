@@ -1,0 +1,785 @@
+-- This might not be needed
+
+local LAND_HEIGHT = 2.0
+local NON_JUMP_VELOCITY = 140.0
+local MIN_STANDABLE_ZNRM = 0.7
+local AIR_SPEED_CAP = 32.8
+local DUCK_MIN_DUCKSPEED = 1.5
+local DEFAULT_JUMP_IMPULSE = 290
+
+local PLAYER_HULL_MIN = Vector(-16.0, -16.0, 0.0)
+local PLAYER_HULL_STAND = Vector(16.0, 16.0, 62.0)
+local PLAYER_HULL_DUCK = Vector(16.0, 16.0, 45.0)
+local PLAYER_HULL_DELTA = (PLAYER_HULL_STAND.z - PLAYER_HULL_DUCK.z) / 2
+local c, VEC_HULL_MIN, VEC_HULL_MAX, VEC_VIEW, VEC_DUCK_HULL_MIN, VEC_DUCK_HULL_MAX, VEC_DUCK_VIEW, DUCK_SPEED_MULTIPLIER, TIME_TO_UNDUCK, TIME_TO_DUCK, EYE_CLEARANCE = Color, Vector(-16, -16, 0), Vector(16, 16, 62), Vector(0, 0, 62), Vector(-16, -16, 0), Vector(16, 16, 45), Vector(0, 0, 45), 0.6, 0.2, 0.4, 12
+
+local g_iTick = {}
+local g_flFrameTime = {}
+
+local g_iButtons = {}
+local g_iOldButtons = {}
+local g_vVel = {}
+local g_vAngles = {}
+
+local g_iLastTickPredicted = {}
+local g_vPreCollisionVelocity = {}
+local g_vLastBaseVelocity = {}
+local g_bLastOnGround = {}
+local g_iLastCollisionTick = {}
+
+local UPHILL_LOSS = -1
+local UPHILL_DEFAULT = 0
+local UPHILL_NEUTRAL = 1
+
+local g_cvDownhill = CreateConVar("rngfix_downhill", "1", FCVAR_NOTIFY, "Enable downhill incline fix.", 0.0, 1.0)
+local g_cvUphill = CreateConVar("rngfix_uphill", "1", FCVAR_NOTIFY, "Enable uphill incline fix. Set to -1 to normalize effects not in the player's favor (not recommended).", -1.0, 1.0)
+local g_cvEdge = CreateConVar("rngfix_edge_client", "1", FCVAR_NOTIFY, "Enable edgebug fix.", 0.0, 1.0)
+local g_cvDebug = CreateConVar("rngfix_debug", "0", FCVAR_NONE, "1 = Enable debug messages. 2 = Enable debug messages and lasers.", 0.0, 2.0)
+local g_cvUseOldSlopefixLogic = CreateConVar("rngfix_useoldslopefixlogic", "0", FCVAR_NOTIFY, "Old Slopefix had some logic errors that could cause double boosts. Enable this on a per-map basis to retain old behavior. (NOT RECOMMENDED)", 0.0, 1.0)
+
+local g_cvMaxVelocity = 80000000000000000000000
+local g_cvGravity = 800
+local g_cvAirAccelerate = 99999999999999999
+
+local IsAutoHopEnabled = function (ply) return true end 
+
+hook.Add("Initialize", "RNGFIX_FlowCompat", function()
+    if not _C then return end
+
+    DEFAULT_JUMP_IMPULSE = _C.Player.JumpPower
+    
+    PLAYER_HULL_MIN = _C.Player.HullMin
+    PLAYER_HULL_STAND = _C.Player.HullStand
+    PLAYER_HULL_DUCK = _C.Player.HullDuck
+    PLAYER_HULL_DELTA = (PLAYER_HULL_STAND.z - PLAYER_HULL_DUCK.z) / 2
+
+    local s1, s2 = _C.Style["Easy Scroll"], _C.Style.Legit
+    IsAutoHopEnabled = function(ply)
+        return ply.Style ~= s1 and ply.Style ~= s2
+    end
+end)
+
+hook.Add("PlayerInitialSpawn", "RNGFIX", function (ply)
+    g_iTick[ply] = 0
+    g_flFrameTime[ply] = 0.0
+
+    g_iButtons[ply] = 0
+    g_vVel[ply] = Vector()
+    g_vAngles[ply] = Angle()
+    g_iOldButtons[ply] = 0
+
+    g_iLastTickPredicted[ply] = 0
+
+    g_vPreCollisionVelocity[ply] = Vector()
+    g_vLastBaseVelocity[ply] = Vector()
+    g_bLastOnGround[ply] = true
+    g_iLastCollisionTick[ply] = 0
+end)
+
+hook.Add("PlayerDisconnected", "RNGFIX", function (ply)
+    g_iTick[ply] = nil
+    g_flFrameTime[ply] = nil
+
+    g_iButtons[ply] = nil
+    g_vVel[ply] = nil
+    g_vAngles[ply] = nil
+    g_iOldButtons[ply] = nil
+
+    g_iLastTickPredicted[ply] = nil
+
+    g_vPreCollisionVelocity[ply] = nil
+    g_vLastBaseVelocity[ply] = nil
+    g_bLastOnGround[ply] = nil
+    g_iLastCollisionTick[ply] = nil
+end)
+
+local band, traceHull, tickInterval, Vector = bit.band, util.TraceHull, engine.TickInterval, Vector
+local function IsDuckCoolingDown(ply)
+    return ply:GetDuckSpeed() < DUCK_MIN_DUCKSPEED
+end
+
+local function Duck(ply, origin)
+    local ducking = ply:IsFlagSet(FL_DUCKING)
+    local nextDucking = ducking
+
+    if band(g_iButtons[ply], IN_DUCK) ~= 0 and not ducking then
+        if not IsDuckCoolingDown(ply) then
+            origin.z = origin.z + PLAYER_HULL_DELTA
+            nextDucking = true
+        end
+    elseif band(g_iButtons[ply], IN_DUCK) == 0 and ducking then
+        local tr = traceHull({
+            start = origin,
+            endpos = origin,
+            mins = PLAYER_HULL_MIN,
+            maxs = PLAYER_HULL_STAND,
+            mask = MASK_PLAYERSOLID_BRUSHONLY
+        })
+        if not tr.Hit then
+            origin.z = origin.z - PLAYER_HULL_DELTA
+            nextDucking = false
+        end
+    end
+
+    return PLAYER_HULL_MIN, (nextDucking and PLAYER_HULL_DUCK or PLAYER_HULL_STAND), origin
+end
+
+-- Function to handle ducking
+local function DuckFix(ply, mv)
+    -- Check if the player is crouch boosting
+    if ply:GetVelocity():Length2D() > 0 and ply:Crouching() then
+        return PLAYER_HULL_MIN, PLAYER_HULL_DUCK, mv:GetOrigin()
+    end
+
+    local ducking = ply:Crouching()
+    local nextDucking = ducking
+
+    -- Adjust ducking speed
+    if ducking then
+        ply:SetDuckSpeed(0)
+        ply:SetUnDuckSpeed(0)
+    else
+        ply:SetDuckSpeed(0.4)
+        ply:SetUnDuckSpeed(0.2)
+    end
+
+    if bit.band(mv:GetButtons(), IN_DUCK) ~= 0 and not ducking then
+        -- Ducking input detected, and player is not currently ducking
+        if not IsDuckCoolingDown(ply) then
+            local origin = mv:GetOrigin()
+            origin.z = origin.z + PLAYER_HULL_DELTA
+            mv:SetOrigin(origin)
+            nextDucking = true
+        end
+    elseif bit.band(mv:GetButtons(), IN_DUCK) == 0 and ducking then
+        -- Ducking input released, and player is currently ducking
+        local tr = util.TraceHull({
+            start = mv:GetOrigin(),
+            endpos = mv:GetOrigin(),
+            mins = PLAYER_HULL_MIN,
+            maxs = PLAYER_HULL_STAND,
+            mask = MASK_PLAYERSOLID_BRUSHONLY
+        })
+        if not tr.Hit then
+            -- No collision detected, can stand up
+            local origin = mv:GetOrigin()
+            origin.z = origin.z - PLAYER_HULL_DELTA
+            mv:SetOrigin(origin)
+            nextDucking = false
+
+            -- Update collision bounds for standing position
+            ply:SetCollisionBounds(PLAYER_HULL_MIN, PLAYER_HULL_STAND)
+        end
+    end
+
+    -- Return new hull sizes and updated origin
+    return PLAYER_HULL_MIN, (nextDucking and PLAYER_HULL_DUCK or PLAYER_HULL_STAND), mv:GetOrigin()
+end
+
+-- Hook to handle setup move
+hook.Add("SetupMove", "DuckMovement", function(ply, mv, cmd)
+    local newMins, newMaxs, newOrigin = DuckFix(ply, mv)
+    ply:SetCollisionBounds(newMins, newMaxs)
+    mv:SetOrigin(newOrigin)
+end)
+
+hook.Add("SetupMove", "PlayerMove", function(ply, mv)
+    -- Check if the player is ducking
+    local isDucking = ply:Crouching()
+
+    -- Adjust collision bounds based on the player's state
+    if isDucking then
+        -- If ducking, set the collision bounds to the ducked size
+        ply:SetCollisionBounds(PLAYER_HULL_MIN, PLAYER_HULL_DUCK)
+    else
+        -- If not ducking, set the collision bounds to the standing size
+        ply:SetCollisionBounds(PLAYER_HULL_MIN, PLAYER_HULL_STAND)
+    end
+end)
+
+local function CanJump(ply)
+    return true
+end
+
+local function CheckVelocity(velocity)
+    local max = g_cvMaxVelocity
+    for i = 1, 3 do
+        velocity[i] = math.Clamp(velocity[i], -max, max)
+    end
+    return velocity
+end
+
+local function StartGravity(ply, velocity)
+    local localGravity = ply:GetGravity()
+    if localGravity == 0.0 then localGravity = 1.0 end
+
+    local baseVelocity = ply:GetBaseVelocity()
+    velocity.z = velocity.z + (baseVelocity.z - localGravity * g_cvGravity * 0.5) * g_flFrameTime[ply]
+
+    return CheckVelocity(velocity)
+end
+
+local function FinishGravity(ply, velocity)
+    local localGravity = ply:GetGravity()
+    if localGravity == 0.0 then localGravity = 1.0 end
+
+    velocity.z = velocity.z - localGravity * g_cvGravity * 0.5 * g_flFrameTime[ply]
+
+    return CheckVelocity(velocity)
+end
+
+local function CheckJumpButton(ply, velocity)
+    if not ply:IsFlagSet(FL_ONGROUND) then return end
+    if not CanJump(ply) then return end
+
+    if ply:IsFlagSet(FL_DUCKING) or ply:GetInternalVariable("m_bDucking") ~= 0 then
+        velocity.z = DEFAULT_JUMP_IMPULSE
+    else
+        velocity.z = velocity.z + DEFAULT_JUMP_IMPULSE
+    end
+
+    return FinishGravity(ply, velocity)
+end
+
+hook.Add("SetupMove", "CustomSetupMove", function(ply, mv, cmd)
+    -- Define the CheckJumpButton function locally
+    local function CheckJumpButton(ply, velocity)
+        if not ply:IsFlagSet(FL_ONGROUND) then return end
+        if not CanJump(ply) then return end
+
+        if ply:IsFlagSet(FL_DUCKING) or ply:GetInternalVariable("m_bDucking") ~= 0 then
+            velocity.z = DEFAULT_JUMP_IMPULSE
+        else
+            velocity.z = velocity.z + DEFAULT_JUMP_IMPULSE
+        end
+
+        return FinishGravity(ply, velocity)
+    end
+
+    -- Call the CheckJumpButton function
+    CheckJumpButton(ply, mv:GetVelocity())
+end)
+
+local function AirAccelerate(ply, velocity, mv)
+    local AA = 500
+    local MV = 32.8
+    local a = mv:GetMoveAngles()
+    local fw, r = a:Forward(), a:Right()
+    local fmove, smove = mv:GetForwardSpeed(), mv:GetSideSpeed()
+
+    fw.z, r.z = 0, 0
+    fw:Normalize()
+    r:Normalize()
+
+    local wish = fw * fmove + r * smove
+    wish.z = 0
+
+    local wishspd = wish:Length()
+    local maxspeed = mv:GetMaxSpeed()
+    if wishspd > maxspeed then
+        wish = wish * (maxspeed / wishspd)
+        wishspd = maxspeed
+    end
+
+    local wishspeed = math.Clamp(wishspd, 0, MV)
+    local wishdir = wish:GetNormalized()
+    local current = velocity:Dot(wishdir)
+    local addspeed = wishspeed - current
+
+    if addspeed <= 0 then
+        return velocity
+    end
+
+    local acc = AA * FrameTime() * wishspd
+    if acc > addspeed then
+        acc = addspeed
+    end
+
+    return velocity + (wishdir * acc)
+end
+
+local function CheckWater(ply)
+    return ply:WaterLevel() > 1
+end
+
+local function PreventCollision(ply, mv, origin, collisionPoint, velocity_tick)
+    local newOrigin = collisionPoint - velocity_tick
+
+    newOrigin.z = newOrigin.z + 0.1
+
+    mv:SetOrigin(newOrigin)
+
+    local adjustment = newOrigin - origin
+
+    g_iLastCollisionTick[ply] = 0
+end
+
+local function ClipVelocity(velocity, nrm)
+    local backoff = velocity:Dot(nrm)
+
+    return velocity - nrm * backoff
+end
+
+local function SetVelocity(ply, velocity, mv)
+    if not velocity then return end
+    velocity:Sub(g_vLastBaseVelocity[ply])
+
+    if mv then
+        mv:SetVelocity(velocity)
+    else
+        ply:SetAbsVelocity(velocity)
+        ply:SetVelocity(velocity + ply:GetBaseVelocity() - ply:GetVelocity())
+    end
+end
+
+local function TracePlayerBBoxForGround(origin, originBelow, mins, maxs, ply)
+    local origMins, origMaxs = Vector(mins), Vector(maxs)
+    local tr = nil
+
+    mins = origMins
+    maxs = Vector(math.min(origMaxs.x, 0.0), math.min(origMaxs.y, 0.0), origMaxs.z)
+    tr = traceHull({
+        start = origin,
+        endpos = originBelow,
+        mins = mins,
+        maxs = maxs,
+        mask = MASK_PLAYERSOLID_BRUSHONLY,
+    })
+    if tr.Hit and tr.HitNormal.z >= MIN_STANDABLE_ZNRM then
+        return tr
+    end
+
+    mins = Vector(math.max(origMins.x, 0.0), math.max(origMins.y, 0.0), origMins.z)
+    maxs = origMaxs
+    tr = traceHull({
+        start = origin,
+        endpos = originBelow,
+        mins = mins,
+        maxs = maxs,
+        mask = MASK_PLAYERSOLID_BRUSHONLY
+    })
+    if tr.Hit and tr.HitNormal.z >= MIN_STANDABLE_ZNRM then
+        return tr
+    end
+
+    mins = Vector(origMins.x, math.max(origMins.y, 0.0), origMins.z)
+    maxs = Vector(math.min(origMaxs.x, 0.0), origMaxs.y, origMaxs.z)
+    tr = traceHull({
+        start = origin,
+        endpos = originBelow,
+        mins = mins,
+        maxs = maxs,
+        mask = MASK_PLAYERSOLID_BRUSHONLY
+    })
+    if tr.Hit and tr.HitNormal.z >= MIN_STANDABLE_ZNRM then
+        return tr
+    end
+
+    mins = Vector(math.max(origMins.x, 0.0), origMins.y, origMins.z)
+    maxs = Vector(origMaxs.x, math.min(origMaxs.y, 0.0), origMaxs.z)
+    tr = traceHull({
+        start = origin,
+        endpos = originBelow,
+        mins = mins,
+        maxs = maxs,
+        mask = MASK_PLAYERSOLID_BRUSHONLY
+    })
+    if tr.Hit and tr.HitNormal.z >= MIN_STANDABLE_ZNRM then
+        return tr
+    end
+
+    return nil
+end
+
+hook.Add("Move", "PlayerMovement", function(ply, mv)
+    local origin = mv:GetOrigin()
+    local originBelow = origin - Vector(0, 0, 10) -- Adjust downward offset as needed
+
+    -- Custom collision bounds for the player
+    local mins = Vector(-16, -16, 0) -- Adjust as needed
+    local maxs = Vector(16, 16, 64) -- Adjust as needed
+
+    -- Perform collision trace to find solid ground below the player
+    local groundTrace = TracePlayerBBoxForGround(origin, originBelow, mins, maxs, ply)
+    if groundTrace then
+        -- Player is standing on solid ground
+        -- Perform additional movement logic here
+    else
+        -- Player is not standing on solid ground
+        -- Apply additional movement constraints or behavior as needed
+    end
+end)
+
+-- Initialize the wasCrouching property in the player's metatable
+PLAYER_META = FindMetaTable("Player")
+if not PLAYER_META then return end
+
+function PLAYER_META:InitializeCrouchTracking()
+    self.wasCrouching = false
+end
+
+-- Hook into player initial spawn to initialize crouch tracking
+hook.Add("PlayerInitialSpawn", "InitializeCrouchTracking", function(ply)
+    ply:InitializeCrouchTracking()
+end)
+
+-- Function to handle ducking speed crop
+function HandleDuckingSpeedCrop(ply, mv)
+    -- Check if the player transitioned from standing to crouching while on the ground
+    if not ply.wasCrouching and ply:Crouching() and ply:OnGround() then
+        local frac = 0.33333333 -- Fraction to reduce speed by
+
+        -- Adjust movement speeds
+        mv:SetForwardSpeed(mv:GetForwardSpeed() * frac)
+        mv:SetSideSpeed(mv:GetSideSpeed() * frac)
+        mv:SetUpSpeed(mv:GetUpSpeed() * frac)
+    end
+
+    -- Update the previous crouching state for the next frame
+    ply.wasCrouching = ply:Crouching()
+end
+
+-- Hook this function to SetupMove
+hook.Add("SetupMove", "HandleDuckingSpeedCrop", function(ply, mv, cmd)
+    HandleDuckingSpeedCrop(ply, mv)
+end)
+
+local function RunPreTickChecks(ply, mv, cmd)
+    if not ply:Alive() then return end
+    if ply:GetMoveType() ~= MOVETYPE_WALK then return end
+    if CheckWater(ply) then return end
+
+    if ply:IsOnGround() and not CanJump(ply) then 
+        return 
+    end
+
+    g_iLastTickPredicted[ply] = g_iTick[ply]
+    g_iButtons[ply] = mv:GetButtons()
+    g_iOldButtons[ply] = mv:GetOldButtons()
+    g_vVel[ply] = Vector(mv:GetForwardSpeed(), mv:GetSideSpeed(), mv:GetUpSpeed())
+    g_vAngles[ply] = mv:GetAngles()
+
+    local velocity = mv:GetVelocity()
+    local baseVelocity = ply:GetBaseVelocity()
+    local origin = mv:GetOrigin()
+
+    local mins, maxs, nextOrigin = Duck(ply, Vector(origin))
+    StartGravity(ply, velocity)
+    CheckJumpButton(ply, velocity)
+    CheckVelocity(velocity)
+    AirAccelerate(ply, velocity, mv)
+
+    baseVelocity.z = 0.0
+    g_vLastBaseVelocity[ply] = baseVelocity
+    velocity:Add(baseVelocity)
+
+    g_vPreCollisionVelocity[ply] = velocity
+    
+    local velocity_tick = velocity * g_flFrameTime[ply]
+    nextOrigin:Add(velocity_tick)
+
+    local tr = traceHull({
+        start = origin,
+        endpos = nextOrigin,
+        mins = mins,
+        maxs = maxs,
+        mask = MASK_PLAYERSOLID_BRUSHONLY
+    })
+
+    if tr.Hit then
+        local nrm = tr.HitNormal
+        
+        local collisionPoint = tr.HitPos
+
+        g_iLastCollisionTick[ply] = g_iTick[ply]
+		if (velocity.z > NON_JUMP_VELOCITY) then return end
+
+        if nrm.z < MIN_STANDABLE_ZNRM then return end
+
+        if game.GetMap() == "bhop_theory" and g_cvUphill:GetInt() == UPHILL_NEUTRAL then
+            if nrm.z < 1.0 and nrm.x*velocity.x + nrm.y*velocity.y < 0.0 then
+                local shouldDoDownhillFixInstead = false
+
+                if g_cvDownhill:GetBool() then
+                    local newVelocity = ClipVelocity(velocity, nrm)
+
+                    if newVelocity.x*newVelocity.x + newVelocity.y*newVelocity.y > velocity.x*velocity.x + velocity.y*velocity.y then
+                        shouldDoDownhillFixInstead = true
+
+                    end
+                end
+
+                if not shouldDoDownhillFixInstead then
+                    PreventCollision(ply, mv, origin, collisionPoint, velocity_tick)
+                    return
+                end
+            end
+        end
+
+        if g_cvEdge:GetBool() then
+            local fraction_left = 1.0 - tr.Fraction
+            local tickEnd
+
+            if nrm.z == 1.0 then
+                tickEnd = Vector(
+                    collisionPoint.x + velocity_tick.x * fraction_left,
+                    collisionPoint.y + velocity_tick.y * fraction_left,
+                    collisionPoint.z
+                )
+            else
+                local velocity2 = ClipVelocity(velocity, nrm)
+                
+                if (velocity2.z > NON_JUMP_VELOCITY) then
+                    return
+                else
+                    velocity2:Mul(g_flFrameTime[ply] * fraction_left)
+                    tickEnd = collisionPoint + velocity2
+                end
+            end
+
+            local tickEndBelow = Vector(tickEnd.x, tickEnd.y, tickEnd.z - LAND_HEIGHT)
+            local tr2 = traceHull({
+                start = tickEnd,
+                endpos = tickEndBelow,
+                mins = mins,
+                maxs = maxs,
+                mask = MASK_PLAYERSOLID_BRUSHONLY
+            })
+
+            if tr2.Hit then
+                local nrm2 = tr2.HitNormal
+
+                if nrm2.z >= MIN_STANDABLE_ZNRM then return end
+
+                if TracePlayerBBoxForGround(tickEnd, tickEndBelow, mins, maxs, ply) then return end
+            end
+
+
+            PreventCollision(ply, mv, origin, collisionPoint, velocity_tick)
+        end
+    end
+end
+
+local function TickInterval()
+    return 1 / engine.TickInterval()
+end
+
+hook.Add("SetupMove", "RNGFIX", function(ply, mv, cmd)
+    g_iTick[ply] = cmd:TickCount()
+    g_flFrameTime[ply] = tickInterval() * ply:GetLaggedMovementValue()
+
+    if (g_cvDownhill:GetBool() or g_cvUphill:GetBool() or g_cvEdge:GetBool()) then
+        RunPreTickChecks(ply, mv, cmd) 
+    end
+end)
+
+local function DoInclineCollisionFixes(ply, nrm, mv)
+    if not g_cvDownhill:GetBool() and g_cvUphill:GetInt() ~= UPHILL_LOSS then return false end
+    
+    if g_iLastTickPredicted[ply] ~= g_iTick[ply] then return false end
+
+    if g_iLastCollisionTick[ply] == g_iTick[ply] and not g_cvUseOldSlopefixLogic:GetBool() then return false end
+
+    if nrm.z == 1.0 then return false end
+
+    local velocity = g_vPreCollisionVelocity[ply]
+
+    if g_cvUseOldSlopefixLogic:GetBool() then
+        velocity:Sub(g_vLastBaseVelocity[ply])
+    end
+
+    local dot = nrm.x*velocity.x + nrm.y*velocity.y
+
+    if dot >= 0 then
+        if not g_cvDownhill:GetBool() then return false end
+    end
+
+    local downhillFixIsBeneficial = false
+
+    local newVelocity = ClipVelocity(velocity, nrm)
+
+    if newVelocity.x*newVelocity.x + newVelocity.y*newVelocity.y > velocity.x*velocity.x + velocity.y*velocity.y then
+        downhillFixIsBeneficial = true
+    end
+
+    if dot < 0 then
+        if not ((downhillFixIsBeneficial and g_cvDownhill:GetBool()) or g_cvUphill:GetInt() == UPHILL_LOSS) then return false end
+    end
+
+    newVelocity.z = 0.0
+
+    if g_cvUseOldSlopefixLogic:GetBool() then
+        if ply:IsFlagSet(FL_BASEVELOCITY) then
+            newVelocity:Add(ply:GetBaseVelocity())
+        end
+
+        if mv then
+            mv:SetVelocity(newVelocity)
+        else
+            ply:SetVelocity(newVelocity - ply:GetVelocity())
+        end
+    else
+        SetVelocity(ply, newVelocity, mv)
+    end
+
+    return true
+end
+
+--[[function CheckJumpButton(ply, mv)
+    -- Get the current and previous button states
+    local buttons = mv:GetButtons()
+    local oldButtons = mv:GetOldButtons()
+
+    -- Check if the player is on the ground and the jump button has just been pressed
+    if not ply:IsOnGround() or not CanJump(ply) then return end
+    if bit.band(buttons, IN_JUMP) ~= 0 and bit.band(oldButtons, IN_JUMP) == 0 then
+        local velocity = mv:GetVelocity()
+
+        -- Apply different jump forces based on whether the player is crouching
+        if ply:IsFlagSet(FL_DUCKING) or ply:GetInternalVariable("m_bDucking") ~= 0 then
+            velocity.z = 290  -- High jump force for crouching
+        else
+            velocity.z = velocity.z + 290  -- Normal jump force
+        end
+
+        mv:SetVelocity(velocity)  -- Set the modified velocity back to the move data
+
+        -- Handle gravity after the jump if necessary
+        return FinishGravity(ply, mv)  -- Ensure FinishGravity is implemented correctly
+    end
+end
+
+hook.Add("Move", "PlayerMovement", function(ply, mv)
+    CheckJumpButton(ply, mv)  -- Directly pass the move data
+end)--]]
+
+local function CanUnduck(player, mv)
+    local newOrigin = Vector(mv:GetOrigin())
+
+    if player:GetGroundEntity() ~= nil then
+        -- Adjust origin based on the difference in hull sizes (ducked vs standing)
+        newOrigin = newOrigin + (VEC_DUCK_HULL_MIN - VEC_HULL_MIN)
+    else
+        -- In air, calculate mid-point adjustment for hull size transition
+        local hullSizeNormal = VEC_HULL_MAX - VEC_HULL_MIN
+        local hullSizeCrouch = VEC_DUCK_HULL_MAX - VEC_DUCK_HULL_MIN
+        newOrigin = newOrigin + (-0.5 * (hullSizeNormal - hullSizeCrouch))
+    end
+
+    -- Define the player's solid mask and collision group
+    local mask = MASK_PLAYERSOLID -- Adjust as necessary
+    local collisionGroup = COLLISION_GROUP_PLAYER_MOVEMENT -- Adjust as necessary
+
+    -- Perform the hull trace
+    local trace = util.TraceHull({
+        start = mv:GetOrigin(),
+        endpos = newOrigin,
+        mins = VEC_HULL_MIN,
+        maxs = VEC_HULL_MAX,
+        filter = player,
+        mask = mask,
+        group = collisionGroup
+    })
+
+    -- Check if the trace started in solid or didn't complete
+    if trace.StartSolid or trace.Fraction ~= 1.0 then
+        return false
+    end
+
+    return true
+end
+
+hook.Add("SetupMove", "CheckCanUnduck", function(ply, mv)
+    CanUnduck(ply, mv)
+end)
+
+local function FinishUnDuck(ply, mv)
+    if not ply:Crouching() then
+        -- Calculate view delta as the difference between crouching and normal hull heights
+        local hullSizeNormal = VEC_HULL_MAX.z - VEC_HULL_MIN.z
+        local hullSizeCrouch = VEC_DUCK_HULL_MAX.z - VEC_DUCK_HULL_MIN.z
+        local viewDelta = (hullSizeNormal - hullSizeCrouch) / 2
+
+        local newOrigin = mv:GetOrigin()
+        newOrigin.z = newOrigin.z + viewDelta  -- Adjust Z origin upwards when unducking
+        mv:SetOrigin(newOrigin)
+
+        ply:SetViewOffset(Vector(0, 0, 62))  -- Standing view height
+    end
+end
+
+local function FinishDuck(ply, mv)
+    if ply:Crouching() then
+        -- Calculate view delta as the difference between normal and crouching hull heights
+        local hullSizeNormal = VEC_HULL_MAX.z - VEC_HULL_MIN.z
+        local hullSizeCrouch = VEC_DUCK_HULL_MAX.z - VEC_DUCK_HULL_MIN.z
+        local viewDelta = (hullSizeNormal - hullSizeCrouch) / 2
+
+        local newOrigin = mv:GetOrigin()
+        newOrigin.z = newOrigin.z - viewDelta  -- Adjust Z origin downwards when ducking
+        mv:SetOrigin(newOrigin)
+
+        ply:SetViewOffset(Vector(0, 0, 45))  -- Crouching view height
+    end
+end
+
+hook.Add("SetupMove", "CustomPlayerMoveHandling", function(ply, mv, cmd)
+    if cmd:KeyDown(IN_DUCK) and not ply:Crouching() then
+        FinishDuck(ply, mv)
+    elseif not cmd:KeyDown(IN_DUCK) and ply:Crouching() then
+        FinishUnDuck(ply, mv)
+    end
+end)
+
+--[[local function PlayerMove(ply, mv)
+    -- Base movement processing
+    hook.Run("BaseClassPlayerMove", ply)
+
+    if not ply:Alive() then
+        mv:SetForwardSpeed(0)
+        mv:SetSideSpeed(0)
+        mv:SetUpSpeed(0)
+    end
+
+    if ply:Alive() then
+        -- Eye position adjustment
+        local eyeClearance = 12.0
+        local offset = ply:GetViewOffset()
+        local start = ply:GetPos()
+        start.z = start.z + ply:GetViewOffset().z
+
+        local endPos = Vector(start.x, start.y, start.z + eyeClearance)
+        local mins, maxs = ply:GetHull()
+
+        local fudge = Vector(1, 1, 0)
+        maxs = maxs + fudge
+
+        local trace = util.TraceHull({
+            start = start,
+            endpos = endPos,
+            mins = mins,
+            maxs = maxs,
+            filter = ply,
+            mask = MASK_PLAYERSOLID
+        })
+
+        if trace.Fraction < 1.0 then
+            -- Adjust the view offset based on the trace
+            local est = start.z + trace.Fraction * (endPos.z - start.z) - ply:GetPos().z - eyeClearance
+            if not ply:Crouching() then
+                offset.z = est
+            else
+                offset.z = math.min(est, offset.z)
+            end
+            ply:SetViewOffset(offset)
+        else
+            -- Set default view offsets based on ducking state
+            if not ply:Crouching() then
+                ply:SetViewOffset(VEC_VIEW)
+            else
+                ply:SetViewOffset(VEC_DUCK_VIEW)
+            end
+        end
+    end
+end
+hook.Add("Move", "CustomPlayerMove", PlayerMove)--]]
