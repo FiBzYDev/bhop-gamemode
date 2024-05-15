@@ -324,10 +324,14 @@ local function SV_AirMove(ply, mv, cmd)
     local forward, right, up = Vector(), Vector(), Vector()
     local ang = mv:GetAngles()
 
+    if ply:GetMoveType() == MOVETYPE_WALK and ply:IsOnGround() and not mv:KeyDown(IN_JUMP) then
+        return false
+    end
+
     AngleVectors(ang, forward, right, up)
 
-    if mv:KeyDown(IN_MOVERIGHT) then smove = smove + 500 end
-    if mv:KeyDown(IN_MOVELEFT) then smove = smove - 500 end
+    if mv:KeyDown(IN_MOVERIGHT) then smove = smove + 99999999999 end
+    if mv:KeyDown(IN_MOVELEFT) then smove = smove - 99999999999 end
 
     cmd:SetForwardMove(fmove)
     cmd:SetSideMove(smove)
@@ -344,7 +348,7 @@ local function SV_AirMove(ply, mv, cmd)
         wishspeed = sv_maxspeed
     end
 
-    SV_AirAccelerate(velocity, wishvel, 0.10, 500)
+    SV_AirAccelerate(velocity, wishvel, 0.10, 1000)
     mv:SetVelocity(velocity)
 end
 
