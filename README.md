@@ -1,1 +1,1 @@
-My version of flows bunnyhop gamemode heavly edited
+My version of flows bunnyhop gamemode heavily edited
