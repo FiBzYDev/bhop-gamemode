@@ -1,7 +1,0 @@
-resource.AddWorkshop "3019940635"
-resource.AddWorkshop "3020406990"
-resource.AddWorkshop "3020853443"
-resource.AddWorkshop "2988195382"
-resource.AddWorkshop "1204199112"
-resource.AddWorkshop "3158331658"
-resource.AddWorkshop "1636700119"
