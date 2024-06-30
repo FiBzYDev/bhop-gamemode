@@ -47,12 +47,12 @@ Old change log:
 
   JHud/SSJ
   - Fix sync display
-  - Fix Jump Display
+  - Fix Jump Display --
   - Fix Eff Display
   - Fix SJP Display
   
   HUD
-  - Fix Momu Hud Lag
+  - Fix Momu Hud Lag --
   - Remake !menu
   - Fix RTV Menu bugs
   - Fix Timer display No Timer on spectator
@@ -60,10 +60,10 @@ Old change log:
   - Finish progress on JCS Scoreboard
    
    Other
-   - Fix trailling
-   - Fix Timer display little off
-   - Fix Replays acting werid
-   - Fix Telefix
+   - Fix trailling --
+   - Fix Timer display little off --
+   - Fix Replays acting werid --
+   - Fix Telefix --
      - Fix Styles
        
   Newest things added:
